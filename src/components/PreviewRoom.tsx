@@ -16,11 +16,13 @@ import {
   FileArchive,
   Play,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Video
 } from 'lucide-react';
 import { BoothSettings, CapturedShot } from '../types';
 import { renderPhotoStrip, renderSinglePhoto } from '../utils/canvasRenderer';
 import { generatePhotoboothGif } from '../utils/gifGenerator';
+import { generatePhotoboothVideo } from '../utils/videoGenerator';
 import { FILTER_OPTIONS, FRAME_OPTIONS } from '../utils/presets';
 
 interface PreviewRoomProps {
@@ -30,7 +32,7 @@ interface PreviewRoomProps {
   onRetake: () => void;
 }
 
-type ViewMode = 'strip' | 'singles' | 'gif';
+type ViewMode = 'strip' | 'singles' | 'gif' | 'video';
 
 export const PreviewRoom: React.FC<PreviewRoomProps> = ({
   shots,
@@ -51,6 +53,12 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
   const [isGeneratingGif, setIsGeneratingGif] = useState<boolean>(false);
   const [isBoomerang, setIsBoomerang] = useState<boolean>(true);
   const [gifSpeed, setGifSpeed] = useState<number>(450); // 450ms default, 250ms fast
+
+  // Video Story State (.mp4 / .webm)
+  const [videoUrl, setVideoUrl] = useState<string>('');
+  const [videoDataUrl, setVideoDataUrl] = useState<string>('');
+  const [videoExt, setVideoExt] = useState<'mp4' | 'webm'>('mp4');
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState<boolean>(false);
 
   // QR Modal State
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
@@ -109,6 +117,26 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
     }
   }, [shots, settings.filter, settings.customCaption, isBoomerang, gifSpeed]);
 
+  // Generate Video Story (MP4/WebM)
+  const triggerVideoGeneration = useCallback(async () => {
+    if (shots.length === 0) return;
+    setIsGeneratingVideo(true);
+    try {
+      const res = await generatePhotoboothVideo(shots, {
+        filter: settings.filter,
+        boomerang: isBoomerang,
+        loops: 2,
+      });
+      setVideoUrl(res.url);
+      setVideoDataUrl(res.dataUrl);
+      setVideoExt(res.extension);
+    } catch (err) {
+      console.error('Failed to generate photobooth video:', err);
+    } finally {
+      setIsGeneratingVideo(false);
+    }
+  }, [shots, settings.filter, isBoomerang]);
+
   // Render on load and changes
   useEffect(() => {
     updateRender();
@@ -117,6 +145,10 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
   useEffect(() => {
     triggerGifGeneration();
   }, [triggerGifGeneration]);
+
+  useEffect(() => {
+    triggerVideoGeneration();
+  }, [triggerVideoGeneration]);
 
   // Synchronize session data to local Express server for mobile phone scan transfer
   useEffect(() => {
@@ -130,13 +162,14 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
         strip: renderedImageUrl,
         rawShots: shots.map((s) => s.dataUrl),
         gif: gifUrl || undefined,
+        video: videoDataUrl || undefined,
       }),
     })
       .then((res) => {
         if (res.ok) setIsSyncedToServer(true);
       })
       .catch((err) => console.warn('Local session sync failed:', err));
-  }, [sessionId, renderedImageUrl, shots, gifUrl]);
+  }, [sessionId, renderedImageUrl, shots, gifUrl, videoDataUrl]);
 
   // Generate QR Code for modal pointing to session viewer
   useEffect(() => {
@@ -257,11 +290,28 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
         }
       }
 
+      // 4. Video Story (.mp4 / .webm)
+      if (videoUrl || videoDataUrl) {
+        try {
+          const vUrl = videoDataUrl || videoUrl;
+          if (vUrl.startsWith('data:video/')) {
+            const base64Data = vUrl.split(',')[1];
+            zip.file(`04-adimasbooth-story.${videoExt}`, base64Data, { base64: true });
+          } else {
+            const vidRes = await fetch(vUrl);
+            const vidBlob = await vidRes.blob();
+            zip.file(`04-adimasbooth-story.${videoExt}`, vidBlob);
+          }
+        } catch (e) {
+          console.warn('Video inclusion skipped in zip:', e);
+        }
+      }
+
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const zipUrl = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = zipUrl;
-      a.download = `adimasbooth-paket-lengkap-3-format-${Date.now()}.zip`;
+      a.download = `adimasbooth-paket-lengkap-4-format-${Date.now()}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -279,6 +329,18 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
     const a = document.createElement('a');
     a.href = gifUrl;
     a.download = `adimasbooth-animated-${Date.now()}.gif`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Download Video Story (.mp4 / .webm)
+  const handleDownloadVideo = () => {
+    const targetUrl = videoUrl || videoDataUrl;
+    if (!targetUrl) return;
+    const a = document.createElement('a');
+    a.href = targetUrl;
+    a.download = `adimasbooth-story-${Date.now()}.${videoExt}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -369,7 +431,20 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               }`}
             >
               <Film className="w-3.5 h-3.5" />
-              3. GIF Booth
+              3. GIF
+            </button>
+
+            <button
+              id="view-video-tab"
+              onClick={() => setViewMode('video')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 ${
+                viewMode === 'video'
+                  ? 'bg-white text-black shadow-sm font-semibold'
+                  : 'text-[#888] hover:text-white hover:bg-[#161616]'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              4. Video Story
             </button>
           </div>
 
@@ -377,6 +452,7 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
             {viewMode === 'strip' && 'FORMAT 1: STRIP JADI'}
             {viewMode === 'singles' && 'FORMAT 2: MENTAHAN 1/1'}
             {viewMode === 'gif' && 'FORMAT 3: ANIMATED GIF'}
+            {viewMode === 'video' && 'FORMAT 4: VIDEO STORY (.MP4)'}
           </div>
         </div>
 
@@ -514,6 +590,51 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
             )}
           </div>
         )}
+
+        {/* View Mode 4: Video Story (.mp4 / .webm) */}
+        {viewMode === 'video' && (
+          <div className="relative p-6 rounded-2xl bg-[#050505] border border-[#1A1A1A] w-full max-h-[76vh] overflow-y-auto flex flex-col items-center">
+            {isGeneratingVideo ? (
+              <div className="flex flex-col items-center justify-center py-24 text-[#888] gap-3">
+                <div className="w-8 h-8 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                <p className="text-xs font-mono uppercase tracking-widest">Membuat Video Story MP4...</p>
+                <p className="text-[10px] text-[#666] font-mono">Format pas untuk IG Story & WA Status (~4 detik)</p>
+              </div>
+            ) : (videoUrl || videoDataUrl) ? (
+              <div className="flex flex-col items-center gap-4 w-full max-w-sm">
+                <div className="relative rounded-xl overflow-hidden border border-[#222] shadow-2xl bg-black">
+                  <video
+                    src={videoUrl || videoDataUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    controls
+                    className="w-full h-auto block"
+                  />
+                </div>
+
+                {/* Video playback & download bar */}
+                <div className="w-full flex items-center justify-between bg-[#0D0D0D] border border-[#1F1F1F] p-2.5 rounded-xl text-xs font-mono">
+                  <div className="flex items-center gap-1 text-[11px] text-[#888]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span>Story Ready (~4s)</span>
+                  </div>
+
+                  <button
+                    onClick={handleDownloadVideo}
+                    className="px-3 py-1 rounded bg-white text-black hover:bg-[#ddd] font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Download className="w-3 h-3" />
+                    Save .{videoExt}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-[#666] font-mono">Gagal memproses video story.</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right Column: Customization Deck & Export Actions */}
@@ -523,7 +644,7 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#888]">
-                Studio Archive • 3 Format Siap Unduh
+                Studio Archive • 4 Format Siap Unduh
               </span>
               <h2 className="text-xl sm:text-2xl font-medium text-white tracking-tight uppercase mt-0.5">
                 Hasil Photobooth Ready
@@ -535,7 +656,7 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
           </div>
 
           <p className="text-xs text-[#888] font-mono leading-relaxed">
-            Dapatkan 3 format lengkap: <strong className="text-white">Photo Strip</strong>, <strong className="text-white">Foto Mentahan 1/1 (polosan)</strong>, dan <strong className="text-white">Animated GIF</strong>.
+            Dapatkan 4 format lengkap: <strong className="text-white">Photo Strip</strong>, <strong className="text-white">Foto Mentahan 1/1</strong>, <strong className="text-white">Animated GIF</strong>, dan <strong className="text-white">Video Story (MP4)</strong>.
           </p>
 
           {/* Master Complete Bundle Button */}
@@ -546,23 +667,23 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
             className="w-full py-3.5 px-4 rounded-xl bg-white text-black hover:bg-[#EEE] font-semibold text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg group"
           >
             <Download className="w-4 h-4 group-hover:-translate-y-0.5 transition-transform" />
-            {isZipping ? 'Menyiapkan Paket...' : '✨ Download Paket Lengkap (3 Format .ZIP)'}
+            {isZipping ? 'Menyiapkan Paket...' : '✨ Download Paket Lengkap (4 Format .ZIP)'}
           </button>
 
           {/* Individual Format Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
             {/* 1. Strip */}
             <button
               id="download-strip-btn"
               onClick={handleDownloadStrip}
               disabled={isRendering || !renderedImageUrl}
-              className="py-2.5 px-3 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+              className="py-2.5 px-2 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
             >
               <div className="flex items-center gap-1 text-white">
                 <Layers className="w-3.5 h-3.5" />
                 <span>1. Strip</span>
               </div>
-              <span className="text-[9px] text-[#777]">Photo Strip (PNG)</span>
+              <span className="text-[9px] text-[#777]">PNG</span>
             </button>
 
             {/* 2. Mentahan 1/1 */}
@@ -570,13 +691,13 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               id="download-all-shots-quick-btn"
               onClick={handleDownloadAllZip}
               disabled={isZipping}
-              className="py-2.5 px-3 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+              className="py-2.5 px-2 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
             >
               <div className="flex items-center gap-1 text-white">
                 <FileArchive className="w-3.5 h-3.5" />
-                <span>2. Mentahan</span>
+                <span>2. Mentah</span>
               </div>
-              <span className="text-[9px] text-[#777]">1/1 Polosan (ZIP)</span>
+              <span className="text-[9px] text-[#777]">ZIP</span>
             </button>
 
             {/* 3. GIF */}
@@ -584,13 +705,27 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               id="download-gif-quick-btn"
               onClick={handleDownloadGif}
               disabled={!gifUrl || isGeneratingGif}
-              className="py-2.5 px-3 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+              className="py-2.5 px-2 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
             >
               <div className="flex items-center gap-1 text-white">
                 <Film className="w-3.5 h-3.5" />
                 <span>3. GIF</span>
               </div>
-              <span className="text-[9px] text-[#777]">{isGeneratingGif ? 'Encoding...' : 'Looping (.gif)'}</span>
+              <span className="text-[9px] text-[#777]">{isGeneratingGif ? '...' : '.gif'}</span>
+            </button>
+
+            {/* 4. Video Story */}
+            <button
+              id="download-video-quick-btn"
+              onClick={handleDownloadVideo}
+              disabled={(!videoUrl && !videoDataUrl) || isGeneratingVideo}
+              className="py-2.5 px-2 rounded-xl bg-[#141414] hover:bg-[#202020] border border-[#262626] text-white font-medium text-[11px] font-mono uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-1 text-white">
+                <Video className="w-3.5 h-3.5" />
+                <span>4. Video</span>
+              </div>
+              <span className="text-[9px] text-[#777]">{isGeneratingVideo ? '...' : `.${videoExt}`}</span>
             </button>
           </div>
 

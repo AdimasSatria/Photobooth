@@ -7,6 +7,7 @@ interface PhotoSession {
   strip: string;
   rawShots: string[];
   gif?: string;
+  video?: string;
   createdAt: number;
 }
 
@@ -39,7 +40,7 @@ async function startServer() {
   // Upload or update session data
   app.post("/api/session", (req, res) => {
     try {
-      const { id, strip, rawShots, gif } = req.body;
+      const { id, strip, rawShots, gif, video } = req.body;
       if (!id || !strip) {
         return res.status(400).json({ error: "Missing required session data" });
       }
@@ -50,6 +51,7 @@ async function startServer() {
         strip,
         rawShots: Array.isArray(rawShots) && rawShots.length > 0 ? rawShots : (existing?.rawShots || []),
         gif: gif || existing?.gif,
+        video: video || existing?.video,
         createdAt: existing?.createdAt || Date.now(),
       });
 
@@ -108,6 +110,27 @@ async function startServer() {
     res.writeHead(200, {
       "Content-Type": "image/gif",
       "Content-Disposition": `attachment; filename="adimasbooth-${session.id}.gif"`,
+      "Content-Length": buffer.length,
+    });
+    res.end(buffer);
+  });
+
+  // Direct binary Video download route (MP4 / WebM for Instagram/WhatsApp Story)
+  app.get("/api/download/:id/video", (req, res) => {
+    const session = sessions.get(req.params.id);
+    if (!session || !session.video) {
+      return res.status(404).send("Video not found");
+    }
+    const matches = session.video.match(/^data:([A-Za-z0-9-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return res.status(400).send("Invalid base64 video format");
+    }
+    const contentType = matches[1] || "video/mp4";
+    const ext = contentType.includes("webm") ? "webm" : "mp4";
+    const buffer = Buffer.from(matches[2], "base64");
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="adimasbooth-story-${session.id}.${ext}"`,
       "Content-Length": buffer.length,
     });
     res.end(buffer);

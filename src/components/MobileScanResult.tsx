@@ -10,16 +10,19 @@ import {
   Share2,
   ExternalLink,
   Camera,
-  Play
+  Play,
+  Video
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { generatePhotoboothGif } from '../utils/gifGenerator';
+import { generatePhotoboothVideo } from '../utils/videoGenerator';
 
 interface SessionData {
   id: string;
   strip: string;
   rawShots: string[];
   gif?: string;
+  video?: string;
   createdAt: number;
 }
 
@@ -32,11 +35,12 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
   const [session, setSession] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'strip' | 'mentahan' | 'gif'>('strip');
+  const [activeTab, setActiveTab] = useState<'strip' | 'mentahan' | 'gif' | 'video'>('strip');
   const [isZipping, setIsZipping] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
   const [isGeneratingGif, setIsGeneratingGif] = useState(false);
   const [gifLoadError, setGifLoadError] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -69,23 +73,34 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
     };
   }, [sessionId]);
 
-  // Active polling: If session is loaded but GIF hasn't arrived yet from desktop
+  // Active polling: If session is loaded but GIF or Video hasn't arrived yet from desktop
   useEffect(() => {
-    if (!session || session.gif) return;
+    if (!session || (session.gif && session.video)) return;
     const interval = setInterval(() => {
       fetch(`/api/session/${sessionId}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((updated: SessionData | null) => {
-          if (updated && updated.gif) {
-            setSession((prev) => (prev ? { ...prev, gif: updated.gif } : updated));
-            setGifLoadError(false);
+          if (updated) {
+            setSession((prev) => {
+              if (!prev) return updated;
+              const hasNewGif = !prev.gif && updated.gif;
+              const hasNewVideo = !prev.video && updated.video;
+              if (hasNewGif || hasNewVideo) {
+                return {
+                  ...prev,
+                  gif: updated.gif || prev.gif,
+                  video: updated.video || prev.video,
+                };
+              }
+              return prev;
+            });
           }
         })
         .catch(() => {});
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [session?.gif, sessionId]);
+  }, [session?.gif, session?.video, sessionId]);
 
   // Client-side fallback: If GIF is missing or failed to load, generate it directly in mobile browser!
   useEffect(() => {
@@ -120,6 +135,7 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
             strip: session.strip,
             rawShots: session.rawShots,
             gif: dataUrl,
+            video: session.video,
           }),
         }).catch(() => {});
       } catch (err) {
@@ -131,6 +147,49 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
 
     return () => clearTimeout(timer);
   }, [session, isGeneratingGif, gifLoadError, sessionId]);
+
+  // Client-side fallback: If Video is missing, generate it directly in mobile browser!
+  useEffect(() => {
+    if (!session || session.video || !session.rawShots || session.rawShots.length === 0 || isGeneratingVideo) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      if (session.video) return;
+      setIsGeneratingVideo(true);
+      try {
+        const shots = session.rawShots.map((url, idx) => ({
+          id: String(idx),
+          dataUrl: url,
+          timestamp: Date.now(),
+        }));
+        const res = await generatePhotoboothVideo(shots, {
+          boomerang: true,
+          loops: 2,
+        });
+        setSession((prev) => (prev ? { ...prev, video: res.dataUrl } : prev));
+
+        // Update server cache so downloads are synchronized
+        fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: sessionId,
+            strip: session.strip,
+            rawShots: session.rawShots,
+            gif: session.gif,
+            video: res.dataUrl,
+          }),
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Fallback mobile video generation error:', err);
+      } finally {
+        setIsGeneratingVideo(false);
+      }
+    }, 1800);
+
+    return () => clearTimeout(timer);
+  }, [session, isGeneratingVideo, sessionId]);
 
   const handleDownloadStrip = () => {
     if (!session?.strip) return;
@@ -161,6 +220,22 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
       a.href = `/api/download/${session.id}/gif`;
     }
     a.download = `adimasbooth-animated-${session.id}.gif`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDownloadVideo = () => {
+    if (!session?.video) return;
+    const isWebm = session.video.startsWith('data:video/webm');
+    const ext = isWebm ? 'webm' : 'mp4';
+    const a = document.createElement('a');
+    if (session.video.startsWith('data:video/')) {
+      a.href = session.video;
+    } else {
+      a.href = `/api/download/${session.id}/video`;
+    }
+    a.download = `adimasbooth-story-${session.id}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -203,11 +278,29 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
         }
       }
 
+      // 4. Video Story (.mp4 / .webm)
+      if (session.video) {
+        try {
+          const isWebm = session.video.startsWith('data:video/webm');
+          const ext = isWebm ? 'webm' : 'mp4';
+          if (session.video.startsWith('data:video/')) {
+            const videoBase64 = session.video.split(',')[1];
+            zip.file(`04-adimasbooth-story.${ext}`, videoBase64, { base64: true });
+          } else {
+            const vidRes = await fetch(session.video);
+            const vidBlob = await vidRes.blob();
+            zip.file(`04-adimasbooth-story.${ext}`, vidBlob);
+          }
+        } catch (e) {
+          console.warn('Video archive skip:', e);
+        }
+      }
+
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const zipUrl = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = zipUrl;
-      a.download = `adimasbooth-lengkap-3-format-${session.id}.zip`;
+      a.download = `adimasbooth-lengkap-4-format-${session.id}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -295,7 +388,7 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
         <div className="p-3.5 rounded-xl bg-[#111] border border-[#222] flex items-center justify-between">
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider text-white">Hasil Foto Siap</h2>
-            <p className="text-[11px] text-[#888] font-mono mt-0.5">Tersedia dalam 3 format lengkap</p>
+            <p className="text-[11px] text-[#888] font-mono mt-0.5">Tersedia dalam 4 format lengkap</p>
           </div>
           <span className="text-[10px] font-mono bg-white text-black px-2 py-0.5 rounded font-bold">
             READY
@@ -309,39 +402,49 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
           className="w-full py-3.5 px-4 rounded-xl bg-white text-black hover:bg-[#EEE] font-semibold text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
         >
           <FileArchive className="w-4 h-4" />
-          <span>{isZipping ? 'Menyiapkan Paket ZIP...' : 'Download Paket Lengkap (3 Format .ZIP)'}</span>
+          <span>{isZipping ? 'Menyiapkan Paket ZIP...' : 'Download Paket Lengkap (4 Format .ZIP)'}</span>
         </button>
 
         {/* Format Selector Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#121212] border border-[#202020] rounded-xl">
+        <div className="grid grid-cols-4 gap-1 p-1 bg-[#121212] border border-[#202020] rounded-xl">
           <button
             onClick={() => setActiveTab('strip')}
-            className={`py-2 px-2 rounded-lg text-[11px] font-mono uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`py-2 px-1 rounded-lg text-[10px] font-mono uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer ${
               activeTab === 'strip' ? 'bg-white text-black font-bold shadow-sm' : 'text-[#888] hover:text-white'
             }`}
           >
             <Layers className="w-3 h-3" />
-            <span>1. Strip</span>
+            <span>Strip</span>
           </button>
 
           <button
             onClick={() => setActiveTab('mentahan')}
-            className={`py-2 px-2 rounded-lg text-[11px] font-mono uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`py-2 px-1 rounded-lg text-[10px] font-mono uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer ${
               activeTab === 'mentahan' ? 'bg-white text-black font-bold shadow-sm' : 'text-[#888] hover:text-white'
             }`}
           >
             <Sparkles className="w-3 h-3" />
-            <span>2. Mentahan</span>
+            <span>Mentah</span>
           </button>
 
           <button
             onClick={() => setActiveTab('gif')}
-            className={`py-2 px-2 rounded-lg text-[11px] font-mono uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`py-2 px-1 rounded-lg text-[10px] font-mono uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer ${
               activeTab === 'gif' ? 'bg-white text-black font-bold shadow-sm' : 'text-[#888] hover:text-white'
             }`}
           >
             <Film className="w-3 h-3" />
-            <span>3. GIF</span>
+            <span>GIF</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('video')}
+            className={`py-2 px-1 rounded-lg text-[10px] font-mono uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer ${
+              activeTab === 'video' ? 'bg-white text-black font-bold shadow-sm' : 'text-[#888] hover:text-white'
+            }`}
+          >
+            <Video className="w-3 h-3" />
+            <span>Story</span>
           </button>
         </div>
 
@@ -494,6 +597,81 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
               >
                 <Download className="w-4 h-4" />
                 Unduh Animated GIF (.gif)
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Video Story (.mp4) */}
+        {activeTab === 'video' && (
+          <div className="space-y-3">
+            <div className="p-4 bg-[#0A0A0A] border border-[#1A1A1A] rounded-2xl flex flex-col items-center">
+              {session.video ? (
+                <>
+                  <div className="max-w-[280px] w-full rounded-xl overflow-hidden shadow-2xl border border-white/15 relative bg-black">
+                    <video
+                      src={session.video}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      controls
+                      className="w-full h-auto object-cover block"
+                    />
+                  </div>
+                  <p className="text-[11px] text-[#888] font-mono mt-3 text-center leading-relaxed">
+                    Video looping (.mp4) • Siap langsung di-upload ke Instagram Story atau WhatsApp Status
+                  </p>
+                </>
+              ) : isGeneratingVideo ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center">
+                  <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white animate-spin mb-3" />
+                  <p className="text-xs font-mono text-white font-medium">Membuat Video Story MP4...</p>
+                  <p className="text-[10px] text-[#666] font-mono mt-1">Mengonversi 4 frame foto jadi MP4 looping</p>
+                </div>
+              ) : (
+                <div className="py-10 flex flex-col items-center justify-center text-center">
+                  <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-emerald-400 animate-spin mb-3" />
+                  <p className="text-xs font-mono text-white font-medium">Menyiapkan Video Story...</p>
+                  <p className="text-[10px] text-[#666] font-mono mt-1 mb-4">Format video MP4 untuk Instagram Story</p>
+                  {session.rawShots && session.rawShots.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        setIsGeneratingVideo(true);
+                        try {
+                          const shots = session.rawShots.map((url, idx) => ({
+                            id: String(idx),
+                            dataUrl: url,
+                            timestamp: Date.now(),
+                          }));
+                          const res = await generatePhotoboothVideo(shots, {
+                            boomerang: true,
+                            loops: 2,
+                          });
+                          setSession((prev) => (prev ? { ...prev, video: res.dataUrl } : prev));
+                        } catch (err) {
+                          console.warn(err);
+                        } finally {
+                          setIsGeneratingVideo(false);
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-mono flex items-center gap-1.5 border border-white/15 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      Proses Video Sekarang
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {session.video && (
+              <button
+                onClick={handleDownloadVideo}
+                className="w-full py-3.5 px-4 rounded-xl bg-white text-black hover:bg-[#EEE] font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
+              >
+                <Download className="w-4 h-4" />
+                Unduh Video Story (.mp4)
               </button>
             )}
           </div>
