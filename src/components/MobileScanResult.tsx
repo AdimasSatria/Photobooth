@@ -322,54 +322,74 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
     return () => clearTimeout(timer);
   }, [session, isGeneratingVideo, sessionId]);
 
+  // Helper to safely trigger file download from base64 dataUrl, blobUrl, or http URL
+  const triggerDownload = async (source: string, filename: string) => {
+    if (!source) return;
+    try {
+      let blobUrl = source;
+      let shouldRevoke = false;
+
+      if (source.startsWith('data:')) {
+        // Convert base64 dataUrl directly to a Blob for iOS/Android mobile compatibility
+        const parts = source.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
+        const binaryStr = atob(parts[1]);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: mime });
+        blobUrl = URL.createObjectURL(blob);
+        shouldRevoke = true;
+      } else if (!source.startsWith('blob:')) {
+        const res = await fetch(source);
+        const blob = await res.blob();
+        blobUrl = URL.createObjectURL(blob);
+        shouldRevoke = true;
+      }
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      if (shouldRevoke) {
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      }
+    } catch (err) {
+      console.error('Download error, fallback direct anchor:', err);
+      const a = document.createElement('a');
+      a.href = source;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
   const handleDownloadStrip = () => {
     if (!session?.strip) return;
-    const a = document.createElement('a');
-    a.href = `/api/download/${session.id}/strip`;
-    a.download = `adimasbooth-strip-${session.id}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDownload(session.strip, `adimasbooth-strip-${session.id}.png`);
   };
 
   const handleDownloadSingleMentahan = (index: number) => {
     if (!session?.rawShots[index]) return;
-    const a = document.createElement('a');
-    a.href = session.rawShots[index];
-    a.download = `adimas-mentahan-0${index + 1}-${session.id}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDownload(session.rawShots[index], `adimas-mentahan-0${index + 1}-${session.id}.png`);
   };
 
   const handleDownloadGif = () => {
     if (!session?.gif) return;
-    const a = document.createElement('a');
-    if (session.gif.startsWith('data:image/gif')) {
-      a.href = session.gif;
-    } else {
-      a.href = `/api/download/${session.id}/gif`;
-    }
-    a.download = `adimasbooth-animated-${session.id}.gif`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDownload(session.gif, `adimasbooth-animated-${session.id}.gif`);
   };
 
   const handleDownloadVideo = () => {
     if (!session?.video) return;
     const isWebm = session.video.startsWith('data:video/webm');
     const ext = isWebm ? 'webm' : 'mp4';
-    const a = document.createElement('a');
-    if (session.video.startsWith('data:video/')) {
-      a.href = session.video;
-    } else {
-      a.href = `/api/download/${session.id}/video`;
-    }
-    a.download = `adimasbooth-story-${session.id}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDownload(session.video, `adimasbooth-story-${session.id}.${ext}`);
   };
 
   const handleDownloadAllZip = async () => {
@@ -380,17 +400,30 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
 
       // 1. Strip
       if (session.strip) {
-        const stripBase64 = session.strip.split(',')[1];
-        zip.file('01-adimasbooth-photo-strip.png', stripBase64, { base64: true });
+        if (session.strip.startsWith('data:')) {
+          const stripBase64 = session.strip.split(',')[1];
+          zip.file('01-adimasbooth-photo-strip.png', stripBase64, { base64: true });
+        } else {
+          const res = await fetch(session.strip);
+          const blob = await res.blob();
+          zip.file('01-adimasbooth-photo-strip.png', blob);
+        }
       }
 
       // 2. Mentahan raw shots
       if (session.rawShots && session.rawShots.length > 0) {
         const mentahanFolder = zip.folder('02-mentahan-1-1');
-        session.rawShots.forEach((shot, i) => {
-          const rawBase64 = shot.split(',')[1];
-          mentahanFolder?.file(`mentahan-shot-0${i + 1}.png`, rawBase64, { base64: true });
-        });
+        for (let i = 0; i < session.rawShots.length; i++) {
+          const shot = session.rawShots[i];
+          if (shot.startsWith('data:')) {
+            const rawBase64 = shot.split(',')[1];
+            mentahanFolder?.file(`mentahan-shot-0${i + 1}.png`, rawBase64, { base64: true });
+          } else {
+            const res = await fetch(shot);
+            const blob = await res.blob();
+            mentahanFolder?.file(`mentahan-shot-0${i + 1}.png`, blob);
+          }
+        }
       }
 
       // 3. GIF
