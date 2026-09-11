@@ -1,0 +1,6 @@
+{
+  "name": "AdimasBooth",
+  "description": "An immersive, sleek online photobooth with live webcam viewfinder, vintage frames, 4-shot photo strips, and instant high-res export.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
