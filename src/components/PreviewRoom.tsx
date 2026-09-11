@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
 import JSZip from 'jszip';
@@ -18,8 +18,12 @@ import {
   Sparkles,
   ExternalLink,
   Video,
-  Clock
+  Clock,
+  AlertTriangle,
+  Globe,
+  Instagram
 } from 'lucide-react';
+import { BoothHost } from '../utils/p2pSync';
 import { BoothSettings, CapturedShot } from '../types';
 import { renderPhotoStrip, renderSinglePhoto } from '../utils/canvasRenderer';
 import { generatePhotoboothGif } from '../utils/gifGenerator';
@@ -267,10 +271,77 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
     }).catch((err) => console.warn('Video sync warning:', err));
   }, [sessionId, videoDataUrl]);
 
+  const boothHostRef = useRef<BoothHost | null>(null);
+  const [customHost, setCustomHost] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('adimas_custom_host') || '';
+    }
+    return '';
+  });
+
+  const isLocalhost = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '0.0.0.0'
+  );
+
+  const isAiStudioDev = typeof window !== 'undefined' && (
+    window.location.hostname.includes('ais-dev-')
+  );
+
+  // Initialize P2P Booth Host for direct peer-to-peer transfer (bypasses server completely)
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const host = new BoothHost(sessionId, () => {
+      if (!renderedImageUrl) return null;
+      return {
+        id: sessionId,
+        strip: renderedImageUrl,
+        rawShots: shots.map((s) => s.dataUrl),
+        gif: gifUrl || undefined,
+        video: videoDataUrl || undefined,
+        createdAt: sessionStartTime,
+      };
+    });
+
+    boothHostRef.current = host;
+
+    return () => {
+      host.destroy();
+      boothHostRef.current = null;
+    };
+  }, [sessionId, renderedImageUrl, gifUrl, videoDataUrl, sessionStartTime, shots]);
+
+  // Broadcast updates whenever GIF or Video is ready
+  useEffect(() => {
+    if (boothHostRef.current && renderedImageUrl) {
+      boothHostRef.current.broadcastUpdate({
+        id: sessionId,
+        strip: renderedImageUrl,
+        rawShots: shots.map((s) => s.dataUrl),
+        gif: gifUrl || undefined,
+        video: videoDataUrl || undefined,
+        createdAt: sessionStartTime,
+      });
+    }
+  }, [renderedImageUrl, gifUrl, videoDataUrl, sessionId, sessionStartTime, shots]);
+
+  const getTargetUrl = useCallback(() => {
+    let baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://adimasbooth.app';
+    if (customHost.trim()) {
+      let h = customHost.trim();
+      if (!h.startsWith('http://') && !h.startsWith('https://')) {
+        h = 'https://' + h;
+      }
+      baseUrl = h.replace(/\/+$/, '');
+    }
+    return `${baseUrl}/?session=${sessionId}`;
+  }, [customHost, sessionId]);
+
   // Generate QR Code for modal pointing to session viewer
   useEffect(() => {
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://adimasbooth.app';
-    const targetUrl = `${baseUrl}/?session=${sessionId}`;
+    const targetUrl = getTargetUrl();
     QRCode.toDataURL(targetUrl, {
       margin: 2,
       width: 320,
@@ -281,7 +352,7 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
     })
       .then(setModalQrDataUrl)
       .catch((err) => console.error('Failed to create QR code:', err));
-  }, [sessionId]);
+  }, [getTargetUrl]);
 
   // Trigger celebration confetti on initial room entry
   useEffect(() => {
@@ -1085,17 +1156,74 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 mb-4">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] font-mono text-white/90">
-                Sesi #{sessionId} {isSyncedToServer ? '• Siap di-scan' : '• Menyinkronkan...'}
-              </span>
+            {/* P2P and Server Dual Sync Status */}
+            <div className="flex flex-col items-center gap-1 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[11px] font-mono text-emerald-300 font-semibold">
+                  P2P Direct Sync Aktif
+                </span>
+                <span className="text-[10px] text-[#777] font-mono">
+                  (ID: #{sessionId})
+                </span>
+              </div>
+              <p className="text-[10px] text-[#777] font-mono">
+                Foto ditransfer langsung dari booth ke HP tanpa limit server.
+              </p>
             </div>
+
+            {/* Localhost / Wi-Fi IP / Vercel Domain Configuration */}
+            {(isLocalhost || isAiStudioDev || customHost) && (
+              <div className="w-full text-left p-3 rounded-2xl bg-[#141414] border border-[#262626] mb-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-mono font-semibold text-white flex items-center gap-1.5">
+                    <Globe className="w-3 h-3 text-amber-400" />
+                    Domain / Host Barcode
+                  </span>
+                  {customHost && (
+                    <button
+                      onClick={() => {
+                        setCustomHost('');
+                        localStorage.removeItem('adimas_custom_host');
+                      }}
+                      className="text-[10px] font-mono text-[#888] hover:text-white underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+
+                {isLocalhost && !customHost && (
+                  <p className="text-[10px] text-amber-300/90 font-mono leading-relaxed mb-2">
+                    ⚠️ HP tidak bisa membuka alamat "localhost". Masukkan IP Wi-Fi laptop (contoh: <code>192.168.1.15:3000</code>) atau domain Vercel kamu:
+                  </p>
+                )}
+
+                {isAiStudioDev && !customHost && (
+                  <p className="text-[10px] text-blue-300/90 font-mono leading-relaxed mb-2">
+                    💡 Sudah deploy di Vercel? Masukkan alamat domain Vercel kamu agar barcode otomatis mengarah ke web publik:
+                  </p>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="cth: 192.168.1.15:3000 atau booth.vercel.app"
+                    value={customHost}
+                    onChange={(e) => {
+                      setCustomHost(e.target.value);
+                      localStorage.setItem('adimas_custom_host', e.target.value);
+                    }}
+                    className="flex-1 px-3 py-1.5 rounded-xl bg-black/60 border border-[#333] text-white text-xs font-mono focus:outline-none focus:border-white"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Modal Actions */}
             <div className="w-full space-y-2">
               <a
-                href={`/?session=${sessionId}`}
+                href={getTargetUrl()}
                 target="_blank"
                 rel="noreferrer"
                 className="w-full py-2.5 px-4 rounded-xl bg-white text-black font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-[#eee] transition-all cursor-pointer shadow-md"
@@ -1104,10 +1232,19 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
                 Buka Tampilan Hasil HP (Tab Baru)
               </a>
 
+              <a
+                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Halo! Ini hasil foto kamu dari Adimas Photobooth: ${getTargetUrl()}`)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-2 px-4 rounded-xl bg-[#1f7a3f] hover:bg-[#258d4a] border border-[#2fa859] text-white text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                Kirim Link ke WhatsApp
+              </a>
+
               <button
                 onClick={() => {
-                  const url = `${window.location.origin}/?session=${sessionId}`;
-                  navigator.clipboard.writeText(url);
+                  navigator.clipboard.writeText(getTargetUrl());
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
@@ -1123,6 +1260,23 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               >
                 Tutup
               </button>
+            </div>
+
+            {/* Support / Problem Help */}
+            <div className="mt-4 pt-3 border-t border-[#1F1F1F] text-center">
+              <p className="text-[11px] text-[#777] font-mono mb-1.5">
+                If you find any problem, please contact me:
+              </p>
+              <a
+                href="https://www.instagram.com/hi_adimassatria?stkn=eDc3OHk3em5sYXkw"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#161616] hover:bg-[#202020] border border-[#282828] text-xs font-mono text-[#DDD] hover:text-white transition-all group"
+              >
+                <Instagram className="w-3 h-3 text-pink-400 group-hover:scale-110 transition-transform" />
+                <span>IG: <strong className="text-white">@hi_adimassatria</strong></span>
+                <ExternalLink className="w-2.5 h-2.5 text-[#666] group-hover:text-white transition-colors" />
+              </a>
             </div>
           </div>
         </div>

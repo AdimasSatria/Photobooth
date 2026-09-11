@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Camera, AlertCircle, RefreshCw, Upload, Sparkles } from 'lucide-react';
+import { Camera, AlertCircle, RefreshCw, Upload, Sparkles, Instagram, ExternalLink } from 'lucide-react';
 import { BoothSettings } from '../types';
 import { FrameOverlay } from './FrameOverlay';
 import { FILTER_OPTIONS } from '../utils/presets';
@@ -388,6 +388,22 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
           >
             {settings.shotMode === 'strip' ? 'Burst Mode (4 Shots)' : 'Single Shot'}
           </button>
+        </div>
+      )}
+
+      {/* Subtle Support / Contact Link */}
+      {!isCapturing && (
+        <div className="mt-4 pb-2 flex items-center justify-center text-center z-10">
+          <a
+            href="https://www.instagram.com/hi_adimassatria?stkn=eDc3OHk3em5sYXkw"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/40 hover:bg-black/70 border border-white/10 hover:border-white/20 text-[11px] font-mono text-[#888] hover:text-white transition-all group"
+          >
+            <Instagram className="w-3 h-3 text-pink-400 group-hover:scale-110 transition-transform" />
+            <span>If you find any problem, please contact me: <strong className="text-white">@hi_adimassatria</strong></span>
+            <ExternalLink className="w-2.5 h-2.5 text-[#555] group-hover:text-white transition-colors" />
+          </a>
         </div>
       )}
     </div>

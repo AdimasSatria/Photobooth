@@ -13,11 +13,13 @@ import {
   Play,
   Video,
   RefreshCw,
-  Clock
+  Clock,
+  Instagram
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { generatePhotoboothGif } from '../utils/gifGenerator';
 import { generatePhotoboothVideo } from '../utils/videoGenerator';
+import { MobileClient, P2PSessionData } from '../utils/p2pSync';
 
 interface SessionData {
   id: string;
@@ -93,7 +95,44 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
     return `${mins}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Progressive resilient polling: Keep trying up to 20 times (24 seconds) if computer is still syncing
+  // 1. Direct P2P Device-to-Device Transfer: Connects directly to booth screen (zero server load, works on Vercel)
+  useEffect(() => {
+    let client: MobileClient | null = null;
+    try {
+      client = new MobileClient(
+        sessionId,
+        (p2pData: P2PSessionData) => {
+          console.log('[Mobile] Received direct P2P data from booth!');
+          try {
+            localStorage.setItem(`adimas_session_${sessionId}`, JSON.stringify(p2pData));
+          } catch {}
+
+          setSession((prev) => ({
+            ...p2pData,
+            gif: p2pData.gif || prev?.gif,
+            video: p2pData.video || prev?.video,
+          }));
+
+          const expiryTime = p2pData.createdAt + 30 * 60 * 1000;
+          const left = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+          setSecondsRemaining(left);
+          setLoading(false);
+          setError(null);
+        },
+        (statusMsg) => {
+          setPollStatus(statusMsg);
+        }
+      );
+    } catch (err) {
+      console.warn('P2P Client error:', err);
+    }
+
+    return () => {
+      client?.destroy();
+    };
+  }, [sessionId, retryTrigger]);
+
+  // 2. Parallel Resilient Server Polling: Fallback if P2P is blocked by strict firewall
   useEffect(() => {
     let isMounted = true;
     let timerId: any;
@@ -451,6 +490,22 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
           <ArrowLeft className="w-3.5 h-3.5" />
           Buka Photobooth
         </button>
+
+        <div className="mt-8 pt-6 border-t border-[#222] text-center">
+          <p className="text-xs text-[#888] font-mono mb-2">
+            If you find any problem with your photos, please contact me:
+          </p>
+          <a
+            href="https://www.instagram.com/hi_adimassatria?stkn=eDc3OHk3em5sYXkw"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#181818] hover:bg-[#252525] border border-[#333] text-xs font-mono text-white transition-all"
+          >
+            <Instagram className="w-3.5 h-3.5 text-pink-400" />
+            <span>IG: <strong>@hi_adimassatria</strong></span>
+            <ExternalLink className="w-3 h-3 text-[#777]" />
+          </a>
+        </div>
       </div>
     );
   }
@@ -485,6 +540,22 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
             <ArrowLeft className="w-3.5 h-3.5" />
             Buka Photobooth
           </button>
+        </div>
+
+        <div className="mt-8 pt-6 border-t border-[#222] text-center">
+          <p className="text-xs text-[#888] font-mono mb-2">
+            If you find any problem, please contact me:
+          </p>
+          <a
+            href="https://www.instagram.com/hi_adimassatria?stkn=eDc3OHk3em5sYXkw"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#181818] hover:bg-[#252525] border border-[#333] text-xs font-mono text-white transition-all"
+          >
+            <Instagram className="w-3.5 h-3.5 text-pink-400" />
+            <span>IG: <strong>@hi_adimassatria</strong></span>
+            <ExternalLink className="w-3 h-3 text-[#777]" />
+          </a>
         </div>
       </div>
     );
@@ -823,6 +894,28 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
             )}
           </div>
         )}
+
+        {/* Support & Problem Help Footer */}
+        <footer className="mt-10 pt-6 pb-4 border-t border-[#1C1C1C] text-center space-y-2.5">
+          <p className="text-xs text-[#888] font-mono leading-relaxed">
+            If you find any problem, please contact me:
+          </p>
+          <div>
+            <a
+              href="https://www.instagram.com/hi_adimassatria?stkn=eDc3OHk3em5sYXkw"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#141414] hover:bg-[#202020] border border-[#282828] text-xs font-mono text-[#DDD] hover:text-white transition-all shadow-sm group"
+            >
+              <Instagram className="w-3.5 h-3.5 text-pink-400 group-hover:scale-110 transition-transform" />
+              <span>IG: <strong className="text-white">@hi_adimassatria</strong></span>
+              <ExternalLink className="w-3 h-3 text-[#666] group-hover:text-white transition-colors" />
+            </a>
+          </div>
+          <p className="text-[10px] text-[#444] font-mono">
+            Adimas Photobooth • 2026
+          </p>
+        </footer>
       </main>
     </div>
   );
