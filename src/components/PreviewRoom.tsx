@@ -17,7 +17,8 @@ import {
   Play,
   Sparkles,
   ExternalLink,
-  Video
+  Video,
+  Clock
 } from 'lucide-react';
 import { BoothSettings, CapturedShot } from '../types';
 import { renderPhotoStrip, renderSinglePhoto } from '../utils/canvasRenderer';
@@ -68,6 +69,24 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
   // Unique session ID for instant mobile scan transfer
   const [sessionId] = useState<string>(() => 'adimas-' + Math.random().toString(36).substring(2, 8));
   const [isSyncedToServer, setIsSyncedToServer] = useState<boolean>(false);
+  const [sessionStartTime] = useState<number>(() => Date.now());
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(30 * 60);
+
+  // 30-minute countdown timer
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+      const left = Math.max(0, 30 * 60 - elapsed);
+      setRemainingSeconds(left);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sessionStartTime]);
+
+  const formatRemainingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Generate high-resolution render of strip
   const updateRender = useCallback(async () => {
@@ -150,10 +169,26 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
     triggerVideoGeneration();
   }, [triggerVideoGeneration]);
 
-  // Synchronize session data to local Express server for mobile phone scan transfer
+  // 1. Instant Fast Sync: Send Photo Strip & Raw Shots immediately (< 300ms, no waiting for GIF/Video)
   useEffect(() => {
     if (!renderedImageUrl || shots.length === 0) return;
 
+    // Immediately cache in localStorage for zero-latency local / tab access
+    try {
+      localStorage.setItem(
+        `adimas_session_${sessionId}`,
+        JSON.stringify({
+          id: sessionId,
+          strip: renderedImageUrl,
+          rawShots: shots.map((s) => s.dataUrl),
+          createdAt: Date.now(),
+        })
+      );
+    } catch {
+      // quota safeguard
+    }
+
+    // Fast initial POST to server
     fetch('/api/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -161,15 +196,76 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
         id: sessionId,
         strip: renderedImageUrl,
         rawShots: shots.map((s) => s.dataUrl),
-        gif: gifUrl || undefined,
-        video: videoDataUrl || undefined,
       }),
     })
       .then((res) => {
         if (res.ok) setIsSyncedToServer(true);
       })
-      .catch((err) => console.warn('Local session sync failed:', err));
-  }, [sessionId, renderedImageUrl, shots, gifUrl, videoDataUrl]);
+      .catch((err) => {
+        console.warn('Initial session sync failed, retrying:', err);
+        setTimeout(() => {
+          fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: sessionId,
+              strip: renderedImageUrl,
+              rawShots: shots.map((s) => s.dataUrl),
+            }),
+          })
+            .then((r) => {
+              if (r.ok) setIsSyncedToServer(true);
+            })
+            .catch(() => {});
+        }, 1500);
+      });
+  }, [sessionId, renderedImageUrl, shots]);
+
+  // 2. Background GIF Sync: Send lightweight GIF once rendered
+  useEffect(() => {
+    if (!gifUrl) return;
+
+    try {
+      const stored = localStorage.getItem(`adimas_session_${sessionId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        parsed.gif = gifUrl;
+        localStorage.setItem(`adimas_session_${sessionId}`, JSON.stringify(parsed));
+      }
+    } catch {}
+
+    fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: sessionId,
+        gif: gifUrl,
+      }),
+    }).catch((err) => console.warn('GIF sync warning:', err));
+  }, [sessionId, gifUrl]);
+
+  // 3. Background Video Sync: Send lightweight Video once rendered
+  useEffect(() => {
+    if (!videoDataUrl) return;
+
+    try {
+      const stored = localStorage.getItem(`adimas_session_${sessionId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        parsed.video = videoDataUrl;
+        localStorage.setItem(`adimas_session_${sessionId}`, JSON.stringify(parsed));
+      }
+    } catch {}
+
+    fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: sessionId,
+        video: videoDataUrl,
+      }),
+    }).catch((err) => console.warn('Video sync warning:', err));
+  }, [sessionId, videoDataUrl]);
 
   // Generate QR Code for modal pointing to session viewer
   useEffect(() => {
@@ -945,12 +1041,38 @@ export const PreviewRoom: React.FC<PreviewRoomProps> = ({
               Scan Barcode / Buka di HP
             </h3>
             <p className="text-xs text-[#AAA] font-mono mt-1 mb-4 leading-relaxed">
-              Arahkan kamera smartphone ke barcode di bawah untuk langsung membuka &amp; mendownload 3 format foto kamu ke galeri HP.
+              Arahkan kamera smartphone ke barcode di bawah untuk langsung membuka &amp; mendownload 4 format foto kamu ke galeri HP.
             </p>
 
+            {/* 30-Minute Validity Timer Badge */}
+            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-mono mb-3.5 ${
+              remainingSeconds <= 0
+                ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                : remainingSeconds < 300
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 animate-pulse'
+                : 'bg-white/5 border-white/15 text-white/90'
+            }`}>
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>
+                {remainingSeconds <= 0
+                  ? 'Barcode Kadaluarsa (Batas 30 Menit)'
+                  : `Berlaku 30 Menit • Sisa: ${formatRemainingTime(remainingSeconds)}`}
+              </span>
+            </div>
+
             {/* High-Resolution QR Canvas */}
-            <div className="p-3 bg-white rounded-2xl shadow-xl border border-white/20 mb-3">
-              {modalQrDataUrl ? (
+            <div className="p-3 bg-white rounded-2xl shadow-xl border border-white/20 mb-3 relative overflow-hidden">
+              {remainingSeconds <= 0 ? (
+                <div className="w-52 h-52 flex flex-col items-center justify-center p-4 text-black text-center bg-gray-100 rounded-xl">
+                  <div className="w-10 h-10 rounded-full bg-red-100 text-red-500 flex items-center justify-center mb-2">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-red-600">Barcode Kadaluarsa</span>
+                  <p className="text-[10px] text-gray-500 font-mono mt-1 leading-tight">
+                    Sesi scan hanya aktif 30 menit demi keamanan & privasi foto.
+                  </p>
+                </div>
+              ) : modalQrDataUrl ? (
                 <img
                   src={modalQrDataUrl}
                   alt="Scannable Photobooth QR Code"

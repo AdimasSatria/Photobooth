@@ -14,15 +14,18 @@ interface PhotoSession {
 // In-memory store for photobooth sessions (zero external database needed)
 const sessions = new Map<string, PhotoSession>();
 
-// Cleanup sessions older than 24 hours
+// Barcode & session expiration time: 30 minutes
+const SESSION_EXPIRY_MS = 30 * 60 * 1000;
+
+// Cleanup sessions older than 30 minutes every 60 seconds
 setInterval(() => {
   const now = Date.now();
   for (const [id, session] of sessions.entries()) {
-    if (now - session.createdAt > 24 * 60 * 60 * 1000) {
+    if (now - session.createdAt > SESSION_EXPIRY_MS) {
       sessions.delete(id);
     }
   }
-}, 30 * 60 * 1000);
+}, 60 * 1000);
 
 async function startServer() {
   const app = express();
@@ -37,23 +40,26 @@ async function startServer() {
     res.json({ status: "ok", activeSessions: sessions.size });
   });
 
-  // Upload or update session data
+  // Upload or update session data (supports partial updates for fast progressive sync)
   app.post("/api/session", (req, res) => {
     try {
       const { id, strip, rawShots, gif, video } = req.body;
-      if (!id || !strip) {
+      const existing = sessions.get(id);
+
+      if (!id || (!strip && !existing)) {
         return res.status(400).json({ error: "Missing required session data" });
       }
 
-      const existing = sessions.get(id);
-      sessions.set(id, {
+      const updatedSession: PhotoSession = {
         id,
-        strip,
+        strip: strip || existing?.strip || '',
         rawShots: Array.isArray(rawShots) && rawShots.length > 0 ? rawShots : (existing?.rawShots || []),
         gif: gif || existing?.gif,
         video: video || existing?.video,
         createdAt: existing?.createdAt || Date.now(),
-      });
+      };
+
+      sessions.set(id, updatedSession);
 
       // Keep up to 300 recent sessions in memory
       if (sessions.size > 300) {
@@ -61,27 +67,50 @@ async function startServer() {
         if (oldestKey) sessions.delete(oldestKey);
       }
 
-      res.json({ success: true, id });
+      res.json({
+        success: true,
+        id,
+        hasStrip: !!updatedSession.strip,
+        hasGif: !!updatedSession.gif,
+        hasVideo: !!updatedSession.video,
+      });
     } catch (err: any) {
       console.error("Error storing session:", err);
       res.status(500).json({ error: err.message || "Failed to store session" });
     }
   });
 
-  // Get session data for mobile scan viewer
+  // Get session data for mobile scan viewer (checks 30-minute limit)
   app.get("/api/session/:id", (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) {
-      return res.status(404).json({ error: "Sesi foto tidak ditemukan atau sudah kadaluarsa." });
+      return res.status(404).json({ error: "Sesi foto tidak ditemukan atau sudah kadaluarsa (30 menit)." });
     }
-    res.json(session);
+
+    const now = Date.now();
+    const age = now - session.createdAt;
+    if (age > SESSION_EXPIRY_MS) {
+      sessions.delete(req.params.id);
+      return res.status(410).json({
+        error: "Barcode dan sesi foto telah kadaluarsa (berlaku maksimal 30 menit).",
+        expired: true,
+      });
+    }
+
+    const remainingMs = Math.max(0, SESSION_EXPIRY_MS - age);
+    res.json({
+      ...session,
+      expiresAt: session.createdAt + SESSION_EXPIRY_MS,
+      remainingSeconds: Math.floor(remainingMs / 1000),
+    });
   });
 
   // Direct binary image download route (ideal for mobile browser download triggers)
   app.get("/api/download/:id/strip", (req, res) => {
     const session = sessions.get(req.params.id);
-    if (!session || !session.strip) {
-      return res.status(404).send("Photo not found");
+    if (!session || !session.strip || Date.now() - session.createdAt > SESSION_EXPIRY_MS) {
+      if (session && Date.now() - session.createdAt > SESSION_EXPIRY_MS) sessions.delete(req.params.id);
+      return res.status(410).send("Photo session expired (30 minutes limit)");
     }
     const matches = session.strip.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {
@@ -99,8 +128,9 @@ async function startServer() {
   // Direct binary GIF download route
   app.get("/api/download/:id/gif", (req, res) => {
     const session = sessions.get(req.params.id);
-    if (!session || !session.gif) {
-      return res.status(404).send("GIF not found");
+    if (!session || !session.gif || Date.now() - session.createdAt > SESSION_EXPIRY_MS) {
+      if (session && Date.now() - session.createdAt > SESSION_EXPIRY_MS) sessions.delete(req.params.id);
+      return res.status(410).send("GIF session expired (30 minutes limit)");
     }
     const matches = session.gif.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {
@@ -118,8 +148,9 @@ async function startServer() {
   // Direct binary Video download route (MP4 / WebM for Instagram/WhatsApp Story)
   app.get("/api/download/:id/video", (req, res) => {
     const session = sessions.get(req.params.id);
-    if (!session || !session.video) {
-      return res.status(404).send("Video not found");
+    if (!session || !session.video || Date.now() - session.createdAt > SESSION_EXPIRY_MS) {
+      if (session && Date.now() - session.createdAt > SESSION_EXPIRY_MS) sessions.delete(req.params.id);
+      return res.status(410).send("Video session expired (30 minutes limit)");
     }
     const matches = session.video.match(/^data:([A-Za-z0-9-+\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {

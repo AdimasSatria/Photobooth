@@ -5,7 +5,7 @@ import { loadImage } from './canvasRenderer';
 
 export interface VideoOptions {
   frameDuration?: number; // ms per photo shot (default: 380ms)
-  width?: number; // video width (default: 720px, even number required for MP4)
+  width?: number; // video width (default: 640px, fast encode, optimized for mobile story)
   boomerang?: boolean; // 0-1-2-3-2-1 looping (default: true)
   loops?: number; // repeat count so video is ~3.5-5s for Instagram/WhatsApp Story (default: 2)
   filter?: FilterType;
@@ -33,7 +33,7 @@ export async function generatePhotoboothVideo(
 
   const {
     frameDuration = 380,
-    width = 720,
+    width = 640,
     boomerang = true,
     loops = 2,
     filter = 'normal',
@@ -130,7 +130,7 @@ export async function generatePhotoboothVideo(
         codec: 'avc1.42001f', // H.264 Baseline Profile level 3.1
         width: videoWidth,
         height: videoHeight,
-        bitrate: 3_500_000,
+        bitrate: 1_800_000,
       });
 
       const frameDurationUs = frameDuration * 1000;

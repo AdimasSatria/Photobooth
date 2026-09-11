@@ -11,7 +11,9 @@ import {
   ExternalLink,
   Camera,
   Play,
-  Video
+  Video,
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { generatePhotoboothGif } from '../utils/gifGenerator';
@@ -32,9 +34,30 @@ interface MobileScanResultProps {
 }
 
 export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, onBackToBooth }) => {
-  const [session, setSession] = useState<SessionData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Check local storage immediately for zero-wait response on same device/browser
+  const [session, setSession] = useState<SessionData | null>(() => {
+    try {
+      const stored = localStorage.getItem(`adimas_session_${sessionId}`);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {}
+    return null;
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(`adimas_session_${sessionId}`);
+      return !stored;
+    } catch {
+      return true;
+    }
+  });
+
   const [error, setError] = useState<string | null>(null);
+  const [isExpired, setIsExpired] = useState<boolean>(false);
+  const [pollStatus, setPollStatus] = useState<string>('Menghubungkan ke studio session...');
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'strip' | 'mentahan' | 'gif' | 'video'>('strip');
   const [isZipping, setIsZipping] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
@@ -42,36 +65,105 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
   const [gifLoadError, setGifLoadError] = useState(false);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
 
+  // 30-minute expiration timer: Max 30 minutes from session creation
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
+    if (!session) return 30 * 60;
+    const expiryTime = session.createdAt + 30 * 60 * 1000;
+    return Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+  });
+
+  useEffect(() => {
+    if (!session) return;
+    const expiryTime = session.createdAt + 30 * 60 * 1000;
+
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+      setSecondsRemaining(left);
+      if (left <= 0) {
+        setIsExpired(true);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [session]);
+
+  const formatCountdown = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${mins}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Progressive resilient polling: Keep trying up to 20 times (24 seconds) if computer is still syncing
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    setError(null);
+    let timerId: any;
+    let attempts = 0;
+    const maxAttempts = 20;
 
-    fetch(`/api/session/${sessionId}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Sesi foto tidak ditemukan atau sudah kadaluarsa.');
+    const pollSession = async () => {
+      try {
+        const res = await fetch(`/api/session/${sessionId}`);
+        if (res.status === 410) {
+          if (isMounted) {
+            setIsExpired(true);
+            setError('Barcode dan sesi foto telah kadaluarsa (berlaku maksimal 30 menit).');
+            setLoading(false);
+          }
+          return;
         }
-        return res.json();
-      })
-      .then((data: SessionData) => {
-        if (isMounted) {
-          setSession(data);
+
+        if (res.ok) {
+          const data: SessionData = await res.json();
+          if (isMounted) {
+            const expiryTime = data.createdAt + 30 * 60 * 1000;
+            const left = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+            if (left <= 0) {
+              setIsExpired(true);
+              setLoading(false);
+              return;
+            }
+            setSecondsRemaining(left);
+            setSession((prev) => ({
+              ...data,
+              gif: data.gif || prev?.gif,
+              video: data.video || prev?.video,
+            }));
+            setLoading(false);
+            setError(null);
+          }
+          return;
+        }
+
+        // Server might still be receiving the upload from computer
+        attempts++;
+        if (attempts < maxAttempts && isMounted) {
+          setPollStatus(`Menyinkronkan foto dari komputer booth... (${attempts}/${maxAttempts})`);
+          timerId = setTimeout(pollSession, 1200);
+        } else if (isMounted) {
+          if (!session) {
+            setError('Sesi foto belum siap atau komputer masih memproses. Silakan klik Coba Lagi.');
+            setLoading(false);
+          }
+        }
+      } catch (err: any) {
+        attempts++;
+        if (attempts < maxAttempts && isMounted) {
+          setPollStatus(`Menghubungkan ulang jaringan... (${attempts}/${maxAttempts})`);
+          timerId = setTimeout(pollSession, 1200);
+        } else if (isMounted && !session) {
+          setError('Koneksi terputus. Silakan periksa jaringan dan coba lagi.');
           setLoading(false);
         }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.message || 'Gagal memuat hasil foto.');
-          setLoading(false);
-        }
-      });
+      }
+    };
+
+    pollSession();
 
     return () => {
       isMounted = false;
+      clearTimeout(timerId);
     };
-  }, [sessionId]);
+  }, [sessionId, retryTrigger, session]);
 
   // Active polling: If session is loaded but GIF or Video hasn't arrived yet from desktop
   useEffect(() => {
@@ -335,24 +427,26 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
       <div className="min-h-screen bg-[#070707] text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white animate-spin mb-4" />
         <h2 className="text-base font-semibold tracking-wider uppercase">Mengambil Foto Anda...</h2>
-        <p className="text-xs text-[#888] font-mono mt-1">Menghubungkan ke AdimasBooth Studio Session</p>
+        <p className="text-xs text-[#AAA] font-mono mt-1 max-w-xs">{pollStatus}</p>
+        <p className="text-[10px] text-[#666] font-mono mt-3">ID Sesi: #{sessionId}</p>
       </div>
     );
   }
 
-  if (error || !session) {
+  // 30-Minute Expiration Screen
+  if (isExpired || (session && secondsRemaining <= 0)) {
     return (
       <div className="min-h-screen bg-[#070707] text-white flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 mb-4 font-mono text-xl">
-          !
+        <div className="w-16 h-16 rounded-3xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 mb-4 font-mono text-2xl">
+          <Clock className="w-7 h-7" />
         </div>
-        <h2 className="text-lg font-semibold tracking-tight uppercase">Foto Tidak Ditemukan</h2>
+        <h2 className="text-lg font-semibold tracking-tight uppercase">Barcode & Sesi Kadaluarsa</h2>
         <p className="text-xs text-[#888] font-mono max-w-md mt-2 mb-6 leading-relaxed">
-          {error || 'Sesi foto mungkin telah kadaluarsa atau laptop/komputer belum menyelesaikan render foto.'}
+          Batas waktu 30 menit untuk barcode dan unduhan foto ini telah berakhir demi keamanan dan privasi foto kamu. Silakan lakukan sesi foto baru di booth.
         </p>
         <button
           onClick={onBackToBooth}
-          className="px-5 py-2.5 rounded-full bg-white text-black hover:bg-[#eee] font-medium text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
+          className="px-6 py-3 rounded-full bg-white text-black hover:bg-[#eee] font-medium text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shadow-lg"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Buka Photobooth
@@ -361,10 +455,45 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
     );
   }
 
+  if (error || !session) {
+    return (
+      <div className="min-h-screen bg-[#070707] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 font-mono text-xl">
+          !
+        </div>
+        <h2 className="text-lg font-semibold tracking-tight uppercase">Menunggu Sesi Foto</h2>
+        <p className="text-xs text-[#888] font-mono max-w-md mt-2 mb-6 leading-relaxed">
+          {error || 'Sesi foto belum siap atau komputer masih memproses render foto.'}
+        </p>
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <button
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              setPollStatus('Mencoba menyinkronkan kembali...');
+              setRetryTrigger((prev) => prev + 1);
+            }}
+            className="px-5 py-2.5 rounded-full bg-white text-black hover:bg-[#eee] font-medium text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shadow-lg"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Coba Hubungkan Lagi
+          </button>
+          <button
+            onClick={onBackToBooth}
+            className="px-5 py-2.5 rounded-full bg-[#181818] border border-[#333] text-[#bbb] hover:text-white font-medium text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Buka Photobooth
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#070707] text-white flex flex-col items-center p-4 sm:p-6 pb-20 selection:bg-white selection:text-black">
       {/* Top Header */}
-      <header className="w-full max-w-md flex items-center justify-between py-3 border-b border-[#1A1A1A] mb-5">
+      <header className="w-full max-w-md flex items-center justify-between py-3 border-b border-[#1A1A1A] mb-4">
         <div className="flex items-center gap-2.5">
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
           <div>
@@ -383,7 +512,25 @@ export const MobileScanResult: React.FC<MobileScanResultProps> = ({ sessionId, o
       </header>
 
       {/* Main Content Area */}
-      <main className="w-full max-w-md space-y-4">
+      <main className="w-full max-w-md space-y-3.5">
+        {/* 30-Minute Validity Live Countdown Banner */}
+        <div className={`px-3.5 py-2 rounded-xl border flex items-center justify-between text-xs font-mono transition-all ${
+          secondsRemaining < 300
+            ? 'bg-red-500/10 border-red-500/30 text-red-300 animate-pulse'
+            : 'bg-[#121212] border-[#252525] text-[#AAA]'
+        }`}>
+          <div className="flex items-center gap-2">
+            <Clock className={`w-3.5 h-3.5 ${secondsRemaining < 300 ? 'text-red-400' : 'text-amber-400'}`} />
+            <span>Barcode berlaku 30 menit</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-[#777]">Sisa:</span>
+            <span className={`font-bold font-mono ${secondsRemaining < 300 ? 'text-red-400' : 'text-amber-300'}`}>
+              {formatCountdown(secondsRemaining)}
+            </span>
+          </div>
+        </div>
+
         {/* Banner Alert */}
         <div className="p-3.5 rounded-xl bg-[#111] border border-[#222] flex items-center justify-between">
           <div>
