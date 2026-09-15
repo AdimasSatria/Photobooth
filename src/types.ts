@@ -2,11 +2,30 @@ export type AspectRatio = '4:3' | '16:9';
 
 export type FilterType = 
   | 'normal' 
+  | 'beauty-glow'
   | 'grayscale' 
   | 'sepia' 
   | 'high-contrast' 
   | 'warm-film' 
-  | 'cyber-neon';
+  | 'cyber-neon'
+  | 'dreamy-pastel';
+
+export type ArHeadEffect = 
+  | 'none' 
+  | 'birds' 
+  | 'hearts' 
+  | 'halo' 
+  | 'stars' 
+  | 'butterflies' 
+  | 'cat-ears';
+
+export interface ArEffectOption {
+  id: ArHeadEffect;
+  name: string;
+  tagline: string;
+  emoji: string;
+  description: string;
+}
 
 export interface FilterOption {
   id: FilterType;
@@ -56,4 +75,7 @@ export interface BoothSettings {
   frameBgColor: string;
   showQrCode: boolean;
   sticker: 'none' | 'stars' | 'hearts' | 'barcode' | 'film';
+  arHeadEffect: ArHeadEffect;
+  beautyMode: boolean;
+  headPositionOffset: number;
 }

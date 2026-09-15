@@ -10,7 +10,7 @@ interface ControlsProps {
   countdown: number | null;
   burstIndex: number | null;
   totalShots: number;
-  onOpenSidebar: (tab: 'frames' | 'filters' | 'settings') => void;
+  onOpenSidebar: (tab: 'frames' | 'filters' | 'settings' | 'ar') => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -29,7 +29,7 @@ export const Controls: React.FC<ControlsProps> = ({
       className="w-full h-28 sm:h-32 bg-[#0D0D0D] border-t border-[#1A1A1A] flex items-center justify-between px-4 sm:px-12 z-30 shrink-0"
     >
       {/* Left 1/3: Aspect & Customization Triggers */}
-      <div className="w-1/3 flex items-center gap-4 sm:gap-8">
+      <div className="w-1/3 flex items-center gap-4 sm:gap-6">
         {/* Frame Trigger */}
         <button
           id="open-frames-drawer-btn"
@@ -59,6 +59,28 @@ export const Controls: React.FC<ControlsProps> = ({
           <div className="flex items-center gap-1.5 text-xs text-white group-hover:text-white/80">
             <Palette className="w-3.5 h-3.5 text-white/70" />
             <span className="font-mono capitalize hidden sm:inline">{settings.filter}</span>
+          </div>
+        </button>
+
+        {/* AR & Beauty Trigger */}
+        <button
+          id="open-ar-drawer-btn"
+          onClick={() => onOpenSidebar('ar')}
+          className="flex flex-col items-start gap-1 text-left cursor-pointer group"
+          title="Filter Love & Burung di Kepala (Apple Booth)"
+        >
+          <span className="text-[10px] text-pink-400/80 group-hover:text-pink-300 uppercase tracking-widest font-bold transition-colors">
+            AR & Beauty
+          </span>
+          <div className="flex items-center gap-1.5 text-xs text-white group-hover:text-white/80">
+            <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+            <span className="font-mono capitalize hidden sm:inline">
+              {settings.arHeadEffect !== 'none'
+                ? settings.arHeadEffect
+                : settings.beautyMode
+                ? 'Glow'
+                : 'Off'}
+            </span>
           </div>
         </button>
 

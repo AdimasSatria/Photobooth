@@ -1,4 +1,4 @@
-import { FilterOption, FrameOption } from '../types';
+import { FilterOption, FrameOption, ArEffectOption } from '../types';
 
 export const FILTER_OPTIONS: FilterOption[] = [
   {
@@ -7,6 +7,20 @@ export const FILTER_OPTIONS: FilterOption[] = [
     cssFilter: 'none',
     canvasFilter: 'none',
     badge: 'Raw'
+  },
+  {
+    id: 'beauty-glow',
+    name: 'Beauty Glow',
+    cssFilter: 'contrast(103%) brightness(109%) saturate(118%)',
+    canvasFilter: 'contrast(103%) brightness(109%) saturate(118%)',
+    badge: 'Flawless ✨'
+  },
+  {
+    id: 'dreamy-pastel',
+    name: 'Soft Glam',
+    cssFilter: 'brightness(106%) contrast(98%) saturate(112%) hue-rotate(4deg)',
+    canvasFilter: 'brightness(106%) contrast(98%) saturate(112%) hue-rotate(4deg)',
+    badge: 'Korean 🌸'
   },
   {
     id: 'grayscale',
@@ -43,6 +57,58 @@ export const FILTER_OPTIONS: FilterOption[] = [
     canvasFilter: 'hue-rotate(180deg) saturate(140%) contrast(115%)',
     badge: 'Neon'
   }
+];
+
+export const AR_EFFECT_OPTIONS: ArEffectOption[] = [
+  {
+    id: 'none',
+    name: 'Normal (Polos)',
+    tagline: 'Tanpa aksesoris kepala',
+    emoji: '🚫',
+    description: 'Tampilan bersih standard studio tanpa efek di kepala.',
+  },
+  {
+    id: 'birds',
+    name: 'Burung di Kepala',
+    tagline: 'Apple Photo Booth 3D Birds',
+    emoji: '🕊️',
+    description: 'Burung kuning kartun berputar memutari kepala dengan sayap mengepak dan jejak bintang.',
+  },
+  {
+    id: 'hearts',
+    name: 'Love di Kepala',
+    tagline: 'Floating Hearts Crown',
+    emoji: '💖',
+    description: 'Mahkota hati cinta pink melayang berputar di atas kepala dengan kilauan manis dan pipi merona.',
+  },
+  {
+    id: 'halo',
+    name: 'Angel Halo',
+    tagline: 'Golden Radiance & Sparkles',
+    emoji: '👼',
+    description: 'Lingkaran cahaya emas bidadari bersinar melayang anggun di atas kepala.',
+  },
+  {
+    id: 'stars',
+    name: 'Bintang Kartun',
+    tagline: 'Dizzy Cartoon Orbit',
+    emoji: '💫',
+    description: 'Bintang-bintang pusing berputar dengan jejak spiral animasi retro lucu.',
+  },
+  {
+    id: 'butterflies',
+    name: 'Kupu-kupu',
+    tagline: 'Pastel Butterfly Garden',
+    emoji: '🦋',
+    description: 'Kupu-kupu pastel terbang mengitari rambut dengan kepakan sayap lembut.',
+  },
+  {
+    id: 'cat-ears',
+    name: 'Telinga Kucing',
+    tagline: 'Anime Kitty Ears & Blush',
+    emoji: '🐱',
+    description: 'Bando telinga kucing lucu dengan rona pipi merah muda dan hidung hati imut.',
+  },
 ];
 
 export const FRAME_OPTIONS: FrameOption[] = [

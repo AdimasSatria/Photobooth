@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Camera, AlertCircle, RefreshCw, Upload, Sparkles, Instagram, ExternalLink } from 'lucide-react';
-import { BoothSettings } from '../types';
+import { Camera, AlertCircle, RefreshCw, Upload, Sparkles, Instagram, ExternalLink, Heart, ChevronUp, ChevronDown } from 'lucide-react';
+import { BoothSettings, ArHeadEffect } from '../types';
 import { FrameOverlay } from './FrameOverlay';
-import { FILTER_OPTIONS } from '../utils/presets';
+import { FILTER_OPTIONS, AR_EFFECT_OPTIONS } from '../utils/presets';
+import { drawArHeadEffect } from '../utils/arRenderer';
 
 interface CameraBoothProps {
   settings: BoothSettings;
@@ -27,6 +28,7 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
   onUpdateSettings
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const arCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -48,8 +50,47 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Get active filter css
-  const activeFilter = FILTER_OPTIONS.find((f) => f.id === settings.filter)?.cssFilter || 'none';
+  // Get active filter css (including beauty mode enhancement)
+  const baseFilter = FILTER_OPTIONS.find((f) => f.id === settings.filter)?.cssFilter || 'none';
+  const activeFilter = (settings.filter === 'normal' && settings.beautyMode)
+    ? 'contrast(104%) brightness(109%) saturate(118%)'
+    : baseFilter;
+
+  // Real-time 60fps AR Canvas Render Loop
+  useEffect(() => {
+    let animId: number;
+
+    const renderLoop = () => {
+      const canvas = arCanvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        if (canvas.width !== Math.round(rect.width) || canvas.height !== Math.round(rect.height)) {
+          canvas.width = Math.round(rect.width);
+          canvas.height = Math.round(rect.height);
+        }
+
+        const ctx = canvas.getContext('2d');
+        if (ctx && canvas.width > 0 && canvas.height > 0) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (settings.arHeadEffect !== 'none' || settings.beautyMode) {
+            drawArHeadEffect(ctx, settings.arHeadEffect, {
+              width: canvas.width,
+              height: canvas.height,
+              time: performance.now() / 1000,
+              headOffset: settings.headPositionOffset ?? 0.26,
+              mirror: settings.mirror,
+              beautyMode: settings.beautyMode,
+            });
+          }
+        }
+      }
+      animId = requestAnimationFrame(renderLoop);
+    };
+
+    animId = requestAnimationFrame(renderLoop);
+    return () => cancelAnimationFrame(animId);
+  }, [settings.arHeadEffect, settings.beautyMode, settings.headPositionOffset, settings.mirror]);
 
   // Initialize camera stream
   const startCamera = useCallback(async () => {
@@ -148,12 +189,50 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
     ctx.textAlign = 'center';
     ctx.fillText('ADIMAS BOOTH • IMMERSIVE LIVE', canvas.width / 2, canvas.height - 40);
 
+    // Bake AR Head effect into simulated frame
+    if (settings.arHeadEffect !== 'none' || settings.beautyMode) {
+      drawArHeadEffect(ctx, settings.arHeadEffect, {
+        width: canvas.width,
+        height: canvas.height,
+        time: performance.now() / 1000,
+        headOffset: settings.headPositionOffset ?? 0.26,
+        mirror: false,
+        beautyMode: settings.beautyMode,
+      });
+    }
+
     return canvas.toDataURL('image/jpeg', 0.95);
-  }, [settings.aspectRatio]);
+  }, [settings.aspectRatio, settings.arHeadEffect, settings.beautyMode, settings.headPositionOffset]);
 
   // Capture frame handler
   const captureFrame = useCallback(async (): Promise<string> => {
-    if (uploadedImage) return uploadedImage;
+    if (uploadedImage) {
+      if (settings.arHeadEffect !== 'none' || settings.beautyMode) {
+        const img = new Image();
+        img.src = uploadedImage;
+        await new Promise((res) => {
+          img.onload = res;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width || 1280;
+        canvas.height = img.height || 720;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          drawArHeadEffect(ctx, settings.arHeadEffect, {
+            width: canvas.width,
+            height: canvas.height,
+            time: performance.now() / 1000,
+            headOffset: settings.headPositionOffset ?? 0.26,
+            mirror: false,
+            beautyMode: settings.beautyMode,
+          });
+          return canvas.toDataURL('image/jpeg', 0.95);
+        }
+      }
+      return uploadedImage;
+    }
+
     if (cameraState === 'simulated' || !videoRef.current || cameraState !== 'ready') {
       return generateSimulatedFrame();
     }
@@ -174,8 +253,22 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
     }
 
     ctx.drawImage(video, 0, 0, vw, vh);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Bake AR Effect and Beauty Glow directly into high-res snapshot
+    if (settings.arHeadEffect !== 'none' || settings.beautyMode) {
+      drawArHeadEffect(ctx, settings.arHeadEffect, {
+        width: vw,
+        height: vh,
+        time: performance.now() / 1000,
+        headOffset: settings.headPositionOffset ?? 0.26,
+        mirror: false,
+        beautyMode: settings.beautyMode,
+      });
+    }
+
     return canvas.toDataURL('image/jpeg', 0.95);
-  }, [cameraState, uploadedImage, settings.mirror, generateSimulatedFrame]);
+  }, [cameraState, uploadedImage, settings.mirror, settings.arHeadEffect, settings.beautyMode, settings.headPositionOffset, generateSimulatedFrame]);
 
   useEffect(() => {
     registerCaptureHandler(captureFrame);
@@ -219,6 +312,12 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
             settings.mirror ? 'scale-x-[-1]' : 'scale-x-100'
           }`}
           style={{ filter: activeFilter }}
+        />
+
+        {/* Live Real-time AR Effects & Beauty Canvas Overlay */}
+        <canvas
+          ref={arCanvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none z-15"
         />
 
         {/* Uploaded Image fallback display */}
@@ -355,9 +454,93 @@ export const CameraBooth: React.FC<CameraBoothProps> = ({
         )}
       </div>
 
+      {/* AR & Beauty Filter Bar */}
+      {onUpdateSettings && (
+        <div className="mt-5 w-full max-w-[720px] flex flex-col items-center gap-2.5 z-10 px-2">
+          {/* Row 1: Beauty Glow + Effect Quick Selectors */}
+          <div className="w-full flex items-center justify-start sm:justify-center gap-2 overflow-x-auto pb-1.5 scrollbar-none">
+            {/* Beauty Glow Toggle Button */}
+            <button
+              id="btn-toggle-beauty-glow"
+              onClick={() => onUpdateSettings({ beautyMode: !settings.beautyMode })}
+              className={`shrink-0 px-3.5 py-1.5 rounded-full border text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+                settings.beautyMode
+                  ? 'bg-gradient-to-r from-pink-500/20 to-rose-500/20 border-pink-400 text-pink-200 ring-1 ring-pink-400/50 shadow-[0_0_15px_rgba(244,63,94,0.3)]'
+                  : 'bg-[#111] border-[#333] text-[#888] hover:text-white hover:border-[#555]'
+              }`}
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${settings.beautyMode ? 'text-pink-400 animate-pulse' : ''}`} />
+              <span>Beauty Glow: {settings.beautyMode ? 'ON ✨' : 'OFF'}</span>
+            </button>
+
+            {/* Quick AR Effect Buttons */}
+            <div className="flex items-center gap-1.5">
+              {AR_EFFECT_OPTIONS.map((eff) => {
+                const isActive = settings.arHeadEffect === eff.id;
+                return (
+                  <button
+                    key={eff.id}
+                    id={`btn-ar-effect-${eff.id}`}
+                    onClick={() => onUpdateSettings({ arHeadEffect: eff.id })}
+                    title={eff.description}
+                    className={`shrink-0 px-3 py-1.5 rounded-full border text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-white text-black border-white font-semibold shadow-[0_0_12px_rgba(255,255,255,0.25)]'
+                        : 'bg-[#111] border-[#262626] text-[#AAA] hover:text-white hover:border-[#444]'
+                    }`}
+                  >
+                    <span>{eff.emoji}</span>
+                    <span className="text-[11px] whitespace-nowrap">{eff.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Row 2: Head Offset Adjuster (if an effect is active) */}
+          {settings.arHeadEffect !== 'none' && (
+            <div className="flex items-center gap-3 px-3.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] font-mono text-[#AAA]">
+              <span>Posisi Efek:</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() =>
+                    onUpdateSettings({
+                      headPositionOffset: Math.max(0.16, (settings.headPositionOffset ?? 0.26) - 0.03),
+                    })
+                  }
+                  title="Naikkan posisi efek di kepala"
+                  className="px-2 py-0.5 rounded bg-[#222] hover:bg-white hover:text-black transition-colors flex items-center gap-1 text-[10px]"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                  Naik
+                </button>
+                <button
+                  onClick={() =>
+                    onUpdateSettings({
+                      headPositionOffset: Math.min(0.38, (settings.headPositionOffset ?? 0.26) + 0.03),
+                    })
+                  }
+                  title="Turunkan posisi efek di kepala"
+                  className="px-2 py-0.5 rounded bg-[#222] hover:bg-white hover:text-black transition-colors flex items-center gap-1 text-[10px]"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                  Turun
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ headPositionOffset: 0.26 })}
+                  className="px-1.5 py-0.5 text-[9px] text-[#666] hover:text-white underline ml-1"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Quick Option Pills under Viewfinder (Matching Immersive UI) */}
       {onUpdateSettings && (
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-3 z-10">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 z-10">
           <button
             onClick={() => onUpdateSettings({ timerSeconds: settings.timerSeconds === 3 ? 0 : 3 })}
             className={`px-5 py-2 rounded-full border text-xs uppercase tracking-widest transition-all cursor-pointer ${

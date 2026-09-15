@@ -1,13 +1,13 @@
 import React from 'react';
-import { X, Check, Palette, Layers, Type, Calendar, Sparkles, QrCode } from 'lucide-react';
-import { BoothSettings } from '../types';
-import { FILTER_OPTIONS, FRAME_OPTIONS } from '../utils/presets';
+import { X, Check, Palette, Layers, Type, Calendar, Sparkles, QrCode, Heart, ChevronUp, ChevronDown } from 'lucide-react';
+import { BoothSettings, ArHeadEffect } from '../types';
+import { FILTER_OPTIONS, FRAME_OPTIONS, AR_EFFECT_OPTIONS } from '../utils/presets';
 
 interface SidebarOptionsProps {
   isOpen: boolean;
   onClose: () => void;
-  activeTab: 'frames' | 'filters' | 'settings';
-  onChangeTab: (tab: 'frames' | 'filters' | 'settings') => void;
+  activeTab: 'frames' | 'filters' | 'settings' | 'ar';
+  onChangeTab: (tab: 'frames' | 'filters' | 'settings' | 'ar') => void;
   settings: BoothSettings;
   onUpdateSettings: (partial: Partial<BoothSettings>) => void;
 }
@@ -44,13 +44,13 @@ export const SidebarOptions: React.FC<SidebarOptionsProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-[#1A1A1A] bg-[#0A0A0A]">
+        <div className="flex border-b border-[#1A1A1A] bg-[#0A0A0A] overflow-x-auto scrollbar-none">
           <button
             id="tab-frames-btn"
             onClick={() => onChangeTab('frames')}
-            className={`flex-1 py-3 text-[11px] font-medium uppercase tracking-widest flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+            className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider flex items-center justify-center gap-1 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'frames'
-                ? 'border-white text-white bg-white/5'
+                ? 'border-white text-white bg-white/5 font-semibold'
                 : 'border-transparent text-[#666] hover:text-white'
             }`}
           >
@@ -60,9 +60,9 @@ export const SidebarOptions: React.FC<SidebarOptionsProps> = ({
           <button
             id="tab-filters-btn"
             onClick={() => onChangeTab('filters')}
-            className={`flex-1 py-3 text-[11px] font-medium uppercase tracking-widest flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+            className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider flex items-center justify-center gap-1 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'filters'
-                ? 'border-white text-white bg-white/5'
+                ? 'border-white text-white bg-white/5 font-semibold'
                 : 'border-transparent text-[#666] hover:text-white'
             }`}
           >
@@ -70,16 +70,28 @@ export const SidebarOptions: React.FC<SidebarOptionsProps> = ({
             Emulsion
           </button>
           <button
+            id="tab-ar-btn"
+            onClick={() => onChangeTab('ar')}
+            className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider flex items-center justify-center gap-1 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'ar'
+                ? 'border-pink-400 text-pink-300 bg-pink-500/10 font-semibold'
+                : 'border-transparent text-[#888] hover:text-pink-300'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+            AR & Beauty
+          </button>
+          <button
             id="tab-settings-btn"
             onClick={() => onChangeTab('settings')}
-            className={`flex-1 py-3 text-[11px] font-medium uppercase tracking-widest flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+            className={`flex-1 py-3 px-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider flex items-center justify-center gap-1 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'settings'
-                ? 'border-white text-white bg-white/5'
+                ? 'border-white text-white bg-white/5 font-semibold'
                 : 'border-transparent text-[#666] hover:text-white'
             }`}
           >
             <Type className="w-3.5 h-3.5" />
-            Caption & Tone
+            Caption
           </button>
         </div>
 
@@ -190,7 +202,130 @@ export const SidebarOptions: React.FC<SidebarOptionsProps> = ({
             </div>
           )}
 
-          {/* TAB 3: CUSTOM CAPTION & STYLE */}
+          {/* TAB 3: AR & BEAUTY EFFECTS (Filter Burung & Love di Kepala) */}
+          {activeTab === 'ar' && (
+            <div className="space-y-4">
+              {/* Beauty Mode Card */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-[#1A1A1A] to-[#121212] border border-pink-500/30">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-pink-500/20 flex items-center justify-center text-pink-400">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Beauty Glow Filter</h3>
+                      <p className="text-[10px] text-pink-400 font-mono">Soft-focus skin smoothing & warm tone</p>
+                    </div>
+                  </div>
+                  <input
+                    id="toggle-beauty-mode-sidebar"
+                    type="checkbox"
+                    checked={settings.beautyMode}
+                    onChange={(e) => onUpdateSettings({ beautyMode: e.target.checked })}
+                    className="w-4 h-4 rounded accent-pink-500 cursor-pointer"
+                  />
+                </div>
+                <p className="text-xs text-[#888] font-mono leading-relaxed mt-2">
+                  Menghaluskan tekstur kulit, memberi kilau pencahayaan alami (glow), dan mencerahkan wajah seperti booth foto kecantikan.
+                </p>
+              </div>
+
+              {/* AR Head Effects */}
+              <div>
+                <label className="block text-[11px] font-medium text-[#AAA] mb-2 uppercase tracking-widest flex items-center justify-between">
+                  <span>Pilih Efek di Kepala (Mirip Booth Apple)</span>
+                  <span className="text-[10px] text-pink-400 font-mono">Real-time AR</span>
+                </label>
+
+                <div className="space-y-2">
+                  {AR_EFFECT_OPTIONS.map((eff) => {
+                    const isSelected = settings.arHeadEffect === eff.id;
+                    return (
+                      <button
+                        key={eff.id}
+                        id={`sidebar-ar-effect-${eff.id}`}
+                        onClick={() => onUpdateSettings({ arHeadEffect: eff.id })}
+                        className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-white/10 to-pink-500/10 border-pink-400 ring-1 ring-pink-400 shadow-md'
+                            : 'bg-[#111] border-[#222] hover:border-[#444]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl w-8 text-center">{eff.emoji}</span>
+                          <div>
+                            <div className="text-xs font-semibold text-white tracking-wide flex items-center gap-2">
+                              {eff.name}
+                              {eff.id === 'birds' && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono">Apple Booth</span>
+                              )}
+                              {eff.id === 'hearts' && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono">Popular</span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#888] font-mono mt-0.5">{eff.description}</p>
+                          </div>
+                        </div>
+
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-pink-400 text-black flex items-center justify-center shrink-0">
+                            <Check className="w-3 h-3" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Head Position Calibration */}
+              {settings.arHeadEffect !== 'none' && (
+                <div className="p-4 rounded-xl bg-[#141414] border border-[#262626] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-white uppercase tracking-wider">Kalibrasi Posisi Efek</span>
+                    <span className="text-[11px] text-[#888] font-mono">
+                      {Math.round((settings.headPositionOffset ?? 0.26) * 100)}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#888] font-mono">
+                    Sesuaikan posisi burung / love agar pas berada di atas kepala Anda.
+                  </p>
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      onClick={() =>
+                        onUpdateSettings({
+                          headPositionOffset: Math.max(0.15, (settings.headPositionOffset ?? 0.26) - 0.03),
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-[#222] hover:bg-white hover:text-black transition-colors text-xs font-mono flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Lebih Tinggi
+                    </button>
+                    <button
+                      onClick={() =>
+                        onUpdateSettings({
+                          headPositionOffset: Math.min(0.38, (settings.headPositionOffset ?? 0.26) + 0.03),
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-[#222] hover:bg-white hover:text-black transition-colors text-xs font-mono flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      Lebih Rendah
+                    </button>
+                    <button
+                      onClick={() => onUpdateSettings({ headPositionOffset: 0.26 })}
+                      className="text-[11px] text-[#666] hover:text-white underline ml-auto cursor-pointer"
+                    >
+                      Reset Default
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: CUSTOM CAPTION & STYLE */}
           {activeTab === 'settings' && (
             <div className="space-y-5">
               {/* Custom Caption */}

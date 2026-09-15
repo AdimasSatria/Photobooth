@@ -32,7 +32,10 @@ export default function App() {
     showTimestamp: true,
     showQrCode: true,
     frameBgColor: '#0a0a0a',
-    sticker: 'none'
+    sticker: 'none',
+    arHeadEffect: 'none',
+    beautyMode: false,
+    headPositionOffset: 0.26,
   });
 
   // Capture loop state
@@ -42,7 +45,7 @@ export default function App() {
   const [burstIndex, setBurstIndex] = useState<number | null>(null);
 
   // Sidebar state
-  const [sidebarTab, setSidebarTab] = useState<'frames' | 'filters' | 'settings' | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<'frames' | 'filters' | 'settings' | 'ar' | null>(null);
 
   // Registered capture function from CameraBooth
   const captureHandlerRef = useRef<(() => Promise<string>) | null>(null);
