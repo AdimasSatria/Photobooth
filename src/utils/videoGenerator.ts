@@ -108,6 +108,34 @@ export async function generatePhotoboothVideo(
   // Attempt Method 1: WebCodecs VideoEncoder + mp4-muxer (Hardware accelerated, ultra fast, true .mp4)
   if (typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined') {
     try {
+      // Find a supported H.264 codec profile for this specific device
+      const codecsToTry = [
+        'avc1.42E01E', // Baseline profile level 3.0 (Highly compatible)
+        'avc1.42001E', // Baseline profile level 3.0
+        'avc1.42001F', // Baseline profile level 3.1
+        'avc1.4D001E', // Main profile level 3.0
+        'avc1.4D0028', // Main profile level 4.0
+        'avc1.640028', // High profile level 4.0
+      ];
+
+      let selectedCodec = 'avc1.42001f'; // Fallback default
+      for (const codec of codecsToTry) {
+        try {
+          const support = await VideoEncoder.isConfigSupported({
+            codec,
+            width: videoWidth,
+            height: videoHeight,
+            bitrate: 1_800_000,
+          });
+          if (support.supported) {
+            selectedCodec = codec;
+            break;
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
         video: {
@@ -127,7 +155,7 @@ export async function generatePhotoboothVideo(
       });
 
       videoEncoder.configure({
-        codec: 'avc1.42001f', // H.264 Baseline Profile level 3.1
+        codec: selectedCodec,
         width: videoWidth,
         height: videoHeight,
         bitrate: 1_800_000,
